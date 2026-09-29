@@ -4,6 +4,7 @@
 
 extern "C" void MemFunc_InitJitArena();
 extern "C" bool MemFunc_IsJitReady();
+extern "C" const char* MemFunc_GetJitStatus();
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/bind.h>
