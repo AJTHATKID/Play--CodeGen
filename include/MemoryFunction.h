@@ -2,6 +2,9 @@
 
 #include "Types.h"
 
+extern "C" void MemFunc_InitJitArena();
+extern "C" bool MemFunc_IsJitReady();
+
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/bind.h>
 #endif
