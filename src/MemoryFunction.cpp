@@ -89,6 +89,15 @@ static bool MemFunc_IsDebuggerAttached()
 }
 
 __attribute__((noinline, optnone, naked))
+static void JIT26Detach()
+{
+	__asm__ volatile(
+	    "mov x16, #0\n"
+	    "brk #0xf00d\n"
+	    "ret\n");
+}
+
+__attribute__((noinline, optnone, naked))
 static void* JIT26PrepareRegion(void* address, size_t length)
 {
 	__asm__ volatile(
@@ -138,8 +147,16 @@ static bool MemFunc_IsUsableJitRegion(void* ptr)
 
 static void MemFunc_ArenaInitLocked()
 {
-	if(g_jitArenaTried) return;
+	if(g_jitArenaReady) return;
 	g_jitArenaTried = true;
+
+	// The automatic StikDebug handoff is asynchronous. If the debugger isn't
+	// attached yet, leave the arena uninitialized so the app can retry safely.
+	if(!MemFunc_IsDebuggerAttached())
+	{
+		snprintf(g_jitStatus, sizeof(g_jitStatus), "jit: waiting for StikDebug");
+		return;
+	}
 
 	void* rx = nullptr;
 	const char* source = "none";
@@ -163,19 +180,6 @@ static void MemFunc_ArenaInitLocked()
 				break;
 			}
 			usleep(50 * 1000);
-		}
-	}
-
-	//Where nothing is enforcing W^X the process can still map an executable
-	//region itself, so fall back to that rather than failing outright.
-	if(rx == nullptr)
-	{
-		void* mapped = mmap(nullptr, MEMFUNC_JIT_ARENA_SIZE, PROT_READ | PROT_EXEC,
-		                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-		if(mapped != MAP_FAILED)
-		{
-			rx = mapped;
-			source = "mmap";
 		}
 	}
 
@@ -212,6 +216,14 @@ static void MemFunc_ArenaInitLocked()
 	g_jitArenaRx = static_cast<uint8*>(rx);
 	g_jitArenaRw = reinterpret_cast<uint8*>(rw);
 	g_jitArenaReady = true;
+
+	// universal.js command 0 cleanly releases the debugger after all executable
+	// memory has been prepared. The 64MB arena is preallocated for the session.
+	if(MemFunc_IsDebuggerAttached())
+	{
+		JIT26Detach();
+	}
+
 	snprintf(g_jitStatus, sizeof(g_jitStatus), "jit: OK via %s %zuMB rx=%p rw=%p",
 	         source, static_cast<size_t>(MEMFUNC_JIT_ARENA_SIZE >> 20),
 	         static_cast<void*>(g_jitArenaRx), static_cast<void*>(g_jitArenaRw));
